@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%23b4531f%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27sans-serif%27 font-size=%2719%27 font-weight=%27700%27 fill=%27white%27 text-anchor=%27middle%27%3EP%3C/text%3E%3C/svg%3E">
+<title>Postmortem — agent failure attribution</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#fff; --ink:#14171c; --muted:#5a6270; --line:#e2e5ea;
+  --accent:#b4531f; --accent-ink:#fff; --accent-soft:#fcefe6;
+  --ok:#1f6f43; --ok-soft:#e8f5ee; --bad:#9b2226; --bad-soft:#fdeaea; --warn:#8a5a00; --warn-soft:#fdf4de;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 10px 26px rgba(0,0,0,.04);
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#15171b; --panel:#1d2025; --ink:#eef1f5; --muted:#9aa3b0; --line:#2e333b;
+  --accent:#f0a57a; --accent-ink:#241208; --accent-soft:#2b211b;
+  --ok:#6ee7a8; --ok-soft:#17291f; --bad:#fca5a5; --bad-soft:#2d1c1d; --warn:#fcd34d; --warn-soft:#2c2718;
+  --shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#15171b; --panel:#1d2025; --ink:#eef1f5; --muted:#9aa3b0; --line:#2e333b;
+  --accent:#f0a57a; --accent-ink:#241208; --accent-soft:#2b211b;
+  --ok:#6ee7a8; --ok-soft:#17291f; --bad:#fca5a5; --bad-soft:#2d1c1d; --warn:#fcd34d; --warn-soft:#2c2718;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+header{background:var(--panel);border-bottom:1px solid var(--line)}
+.top{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;padding:18px 0 12px}
+h1{margin:0;font-size:21px}
+.sub{color:var(--muted);font-size:13px}
+.chips{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--bg)}
+nav{display:flex;gap:2px;overflow-x:auto}
+nav button{border:0;background:none;color:var(--muted);font:inherit;padding:9px 14px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+nav button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+nav button:hover{color:var(--ink)}
+main{padding:20px 0 64px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow);margin-bottom:16px}
+.card h2{margin:0 0 10px;font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.cols{display:grid;grid-template-columns:minmax(0,330px) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.cols{grid-template-columns:1fr}}
+label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 5px}
+select,input[type=text]{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 10px;font:inherit}
+textarea{width:100%;min-height:150px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:10px;font:12px/1.5 var(--mono);resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+button.btn{font:inherit;font-weight:600;border-radius:9px;padding:9px 15px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+button.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+button.btn:disabled{opacity:.55;cursor:progress}
+.verdict{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--bg)}
+.verdict h3{margin:0 0 4px;font-size:18px}
+.verdict .cls{font:13px/1.4 var(--mono);color:var(--accent)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:12px}
+.kpi{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel)}
+.kpi b{display:block;font-size:19px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+ol.steps{list-style:none;margin:10px 0 0;padding:0;counter-reset:s}
+ol.steps li{border:1px solid var(--line);border-left-width:3px;border-radius:0 9px 9px 0;padding:9px 11px;margin:7px 0;background:var(--bg);font-size:13.5px}
+ol.steps li .tool{font-family:var(--mono);font-size:12.5px}
+ol.steps li.ok{border-left-color:var(--ok)}
+ol.steps li.fail{border-left-color:var(--bad);background:var(--bad-soft)}
+ol.steps li.break{border-left-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
+ol.steps li .why{display:block;color:var(--muted);font-size:12.5px;margin-top:3px}
+.badge{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;margin-left:6px;border:1px solid var(--line)}
+.badge.break{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.truth{margin-top:12px;padding:10px 12px;border-radius:9px;font-size:13px;border:1px solid var(--line)}
+.truth.hit{background:var(--ok-soft)}
+.truth.miss{background:var(--warn-soft)}
+.hint{color:var(--muted);font-size:12.5px}
+.err{color:var(--bad)}
+.hidden{display:none}
+footer{background:var(--panel);border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;padding:14px 0}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="top">
+    <h1>Postmortem</h1>
+    <span class="sub">which step broke the agent run — and what to change</span>
+    <span class="chips">
+      <span class="chip" id="chip-lib">library …</span>
+      <span class="chip">no model · CPU only</span>
+      <button class="btn" id="theme" title="light / dark">◐</button>
+    </span>
+  </div>
+  <nav id="tabs">
+    <button data-tab="analyse" aria-selected="true">Analyse</button>
+    <button data-tab="paste" aria-selected="false">Paste a trace</button>
+    <button data-tab="report" aria-selected="false">Report</button>
+    <button data-tab="benchmark" aria-selected="false">Benchmark</button>
+    <button data-tab="corpus" aria-selected="false">Corpus</button>
+  </nav>
+</div></header>
+
+<main class="wrap">
+<div class="cols">
+  <div>
+    <div class="card" id="panel-controls">
+      <h2>Run something that fails</h2>
+      <label for="task">Task</label>
+      <select id="task"></select>
+      <label for="policy">Agent behaviour</label>
+      <select id="policy"></select>
+      <p class="hint" id="policy-note"></p>
+      <div class="row">
+        <button class="btn primary" id="run">Run in the sandbox</button>
+        <button class="btn" id="load">Load a recorded run</button>
+      </div>
+      <p class="hint" id="run-note"></p>
+    </div>
+  </div>
+
+  <div>
+    <section id="panel-analyse">
+      <div class="card">
+        <h2>Verdict</h2>
+        <div class="verdict" id="verdict"><span class="hint">Run a trajectory, or load a recorded one.</span></div>
+        <div class="kpis" id="kpis"></div>
+        <div id="truth"></div>
+      </div>
+      <div class="card">
+        <h2>Why</h2>
+        <div id="why"><span class="hint">—</span></div>
+      </div>
+      <div class="card">
+        <h2>The run, step by step</h2>
+        <ol class="steps" id="steps"></ol>
+      </div>
+      <div class="card">
+        <h2>Similar runs seen before</h2>
+        <table id="neighbours"><thead><tr><th>Task</th><th>Fault</th><th>Diagnosis</th><th>Similarity</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section id="panel-paste" class="card hidden">
+      <h2>Paste a trace</h2>
+      <p class="hint">A JSON object with a <code>steps</code> list; each step needs <code>tool</code>,
+         <code>ok</code>, and optionally <code>args</code>, <code>error</code>, <code>intent</code>.</p>
+      <textarea id="json" spellcheck="false"></textarea>
+      <div class="row">
+        <button class="btn primary" id="attribute">Attribute</button>
+        <button class="btn" id="fill">Fill with an example</button>
+      </div>
+      <p class="hint" id="paste-note"></p>
+    </section>
+
+    <section id="panel-report" class="card hidden">
+      <h2>Incident report</h2>
+      <p class="hint">A report for the ticket: the verdict, the evidence, the step list and what to change.
+         The PDF is generated here, with no external service.</p>
+      <label for="rname">Name for the report</label>
+      <input type="text" id="rname" placeholder="nightly-agent-run-414">
+      <div class="row">
+        <button class="btn primary" id="dl-pdf">Download PDF</button>
+        <button class="btn" id="dl-md">Markdown</button>
+        <button class="btn" id="dl-html">Printable HTML</button>
+      </div>
+      <p class="hint" id="dl-note"></p>
+    </section>
+
+    <section id="panel-benchmark" class="card hidden">
+      <h2>Measured against replay</h2>
+      <div id="benchmark"><span class="hint">loading…</span></div>
+    </section>
+
+    <section id="panel-corpus" class="card hidden">
+      <h2>Corpus</h2>
+      <div id="corpus"><span class="hint">loading…</span></div>
+    </section>
+  </div>
+</div>
+</main>
+
+<footer><div class="wrap">Postmortem · labels come from replaying each prefix against the task's own verifier</div></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+
+async function post(url, body){
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body||{})});
+  if(!r.ok) throw new Error((await r.text()).slice(0,300));
+  return r.json();
+}
+async function get(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error((await r.text()).slice(0,300));
+  return r.json();
+}
+function el(t,c,x){ const e=document.createElement(t); if(c) e.className=c; if(x!==undefined) e.textContent=x; return e; }
+const pretty = (s) => (s||"").replace(/_/g," ");
+
+function showTab(tab){
+  document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected', String(b.dataset.tab===tab)));
+  ["analyse","paste","report","benchmark","corpus"].forEach(t => $("panel-"+t).classList.toggle("hidden", t!==tab));
+  $("panel-controls").classList.toggle("hidden", tab!=="analyse");
+  if(tab==="benchmark") loadBenchmark();
+  if(tab==="corpus") loadCorpus();
+}
+
+function renderVerdict(a, truth, extra){
+  const v = $("verdict"); v.innerHTML = "";
+  // Two separate facts: the point of no return, and where the run first went wrong.
+  // Showing one as the other read as "Step 1 broke the run - no fatal step".
+  v.appendChild(el("h3","", a.breaking_step!==null && a.breaking_step!==undefined
+    ? "Step " + a.breaking_step + " broke the run"
+    : (a.first_wrong_step!==null && a.first_wrong_step!==undefined
+        ? "No step was fatal — the run first went wrong at step " + a.first_wrong_step
+        : "No single step was fatal")));
+  v.appendChild(el("div","cls", pretty(a.fault_class) + " · " + pretty(a.label_kind)));
+  v.appendChild(el("p","", a.advice || ""));
+
+  $("kpis").innerHTML = "";
+  [["confidence", Math.round(100*(a.confidence||0))+"%"],
+   ["point of no return", a.breaking_step===null||a.breaking_step===undefined ? "none" : "step "+a.breaking_step],
+   ["first wrong move", a.first_wrong_step===null||a.first_wrong_step===undefined ? "none" : "step "+a.first_wrong_step],
+   ["evidence used", a.layer],
+   ["steps", (a.step_notes||[]).length],
+   ["failed calls", (a.step_notes||[]).filter(n=>!n.ok).length]]
+   .forEach(([k,val])=>{ const d=el("div","kpi"); d.appendChild(el("b","",String(val))); d.appendChild(el("span","",k)); $("kpis").appendChild(d); });
+
+  const t = $("truth"); t.innerHTML = "";
+  if(truth){
+    const hit = truth.breaking_step === a.breaking_step;
+    const d = el("div","truth " + (hit ? "hit" : "miss"));
+    d.appendChild(el("strong","", hit ? "Matches replay. " : "Differs from replay. "));
+    d.appendChild(document.createTextNode(
+      "Replay re-ran every prefix against the verifier and found "
+      + (truth.breaking_step===null ? "no fatal step" : "step " + truth.breaking_step)
+      + " (" + pretty(truth.label_kind) + ")"
+      + (truth.fault_from_policy ? ", behaviour built to fail by " + pretty(truth.fault_from_policy) : "")
+      + (extra ? " — labelling it by replay took " + extra + "s" : "") + "."));
+    t.appendChild(d);
+  }
+
+  const why = $("why"); why.innerHTML = "";
+  (a.evidence||[]).forEach(e=>{
+    const d = el("div","truth");
+    d.appendChild(el("strong","", e.rule || ""));
+    const bits = Object.entries(e).filter(([k])=>k!=="rule").map(([k,v])=>k+": "+v).join(" · ");
+    if(bits) d.appendChild(el("span","why", bits));
+    why.appendChild(d);
+  });
+  if(!(a.evidence||[]).length) why.appendChild(el("span","hint","—"));
+
+  const ol = $("steps"); ol.innerHTML = "";
+  (a.step_notes||[]).forEach(n=>{
+    const li = el("li", n.index===a.breaking_step ? "break" : (n.ok ? "ok" : "fail"));
+    if(n.index===a.first_wrong_step && n.index!==a.breaking_step) li.classList.add("fail");
+    const head = el("span","tool", n.index + "  " + n.tool);
+    li.appendChild(head);
+    if(n.index===a.breaking_step) li.appendChild(el("span","badge break","point of no return"));
+    if(n.index===a.first_wrong_step) li.appendChild(el("span","badge","first wrong move"));
+    if(n.repeat>1) li.appendChild(el("span","badge","repeat "+n.repeat));
+    li.appendChild(el("span","why", (n.ok ? n.effect : "failed") + (n.error ? " — " + n.error : "")));
+    ol.appendChild(li);
+  });
+
+  const tb = $("neighbours").querySelector("tbody"); tb.innerHTML = "";
+  (a.neighbours||[]).forEach(nb=>{
+    const tr = el("tr");
+    tr.append(el("td","",nb.task), el("td","",pretty(nb.fault_from_replay)||"—"),
+              el("td","",pretty(nb.label_kind)), el("td","num",String(nb.bm25)));
+    tb.appendChild(tr);
+  });
+}
+
+$("run").onclick = async () => {
+  $("run").disabled = true; $("run-note").textContent = "running the task and replaying every prefix…";
+  try{
+    const r = await post("/api/run", {task:$("task").value, policy:$("policy").value});
+    if(r.error){ $("run-note").textContent = r.error; return; }
+    state = r; renderVerdict(r.attribution, r.replay_truth, r.seconds_to_label_by_replay);
+    $("run-note").textContent = "outcome: " + r.trace.outcome + " · " + r.trace.steps.length + " steps";
+    $("json").value = JSON.stringify(r.trace, null, 1);
+  } catch(e){ $("run-note").textContent = e.message; }
+  finally{ $("run").disabled = false; }
+};
+
+$("load").onclick = async () => {
+  $("load").disabled = true;
+  try{
+    const r = await get("/api/example?policy=" + encodeURIComponent($("policy").value));
+    if(r.error){ $("run-note").textContent = r.error; return; }
+    const a = await post("/api/attribute", {trace: r.trace});
+    if(a.error){ $("run-note").textContent = a.error; return; }
+    state = {trace:r.trace, attribution:a.attribution, replay_truth:r.replay_truth};
+    renderVerdict(a.attribution, r.replay_truth, null);
+    $("run-note").textContent = "recorded run · outcome: " + r.trace.outcome;
+    $("json").value = JSON.stringify(r.trace, null, 1);
+  } catch(e){ $("run-note").textContent = e.message; }
+  finally{ $("load").disabled = false; }
+};
+
+$("attribute").onclick = async () => {
+  $("attribute").disabled = true;
+  try{
+    const a = await post("/api/attribute", {trace: $("json").value});
+    if(a.error){ $("paste-note").textContent = a.error; return; }
+    $("paste-note").textContent = "attributed " + a.steps + " steps — see the Analyse tab";
+    renderVerdict(a.attribution, null, null);
+    showTab("analyse");
+  } catch(e){ $("paste-note").textContent = e.message; }
+  finally{ $("attribute").disabled = false; }
+};
+
+$("fill").onclick = () => {
+  $("json").value = JSON.stringify({
+    outcome: "failure",
+    task: "pasted-run",
+    steps: [
+      {tool:"list_files", args:{}, ok:true, intent:"survey", output:"pkg/a.py\npkg/b.py", error:""},
+      {tool:"read_file", args:{path:"pkg"}, ok:false, intent:"read a file", output:"", error:"IsADirectoryError: pkg"},
+      {tool:"patch", args:{path:"pkg/a.py", old:"x", new:"y"}, ok:true, intent:"fix it", output:"applied", error:""},
+      {tool:"run_tests", args:{}, ok:false, intent:"check", output:"AssertionError", error:"tests failed"}
+    ]
+  }, null, 1);
+  $("paste-note").textContent = "example loaded — press Attribute";
+};
+
+async function download(kind){
+  if(!state){ $("dl-note").textContent = "Analyse a run first."; return; }
+  const btn = $("dl-"+kind); btn.disabled = true;
+  try{
+    const r = await fetch("/api/report."+kind, {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({name: $("rname").value})});
+    if(!r.ok) throw new Error(await r.text());
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (r.headers.get("Content-Disposition")||"").match(/filename="([^"]+)"/)?.[1] || ("postmortem."+kind);
+    document.body.appendChild(a); a.click(); a.remove();
+    $("dl-note").textContent = "Downloaded " + a.download + " (" + Math.round(blob.size/1024) + " KB).";
+  } catch(e){ $("dl-note").textContent = e.message; }
+  finally{ btn.disabled = false; }
+}
+$("dl-pdf").onclick = () => download("pdf");
+$("dl-md").onclick = () => download("md");
+$("dl-html").onclick = () => download("html");
+
+function tableFrom(rows, head){
+  const t = el("table");
+  if(head){ const tr=el("tr"); head.forEach(h=>tr.appendChild(el("th","",h)));
+            const th=el("thead"); th.appendChild(tr); t.appendChild(th); }
+  const tb = el("tbody");
+  rows.forEach(r=>{ const tr=el("tr"); r.forEach((c,i)=>tr.appendChild(el("td", i?"num":"", String(c)))); tb.appendChild(tr); });
+  t.appendChild(tb); return t;
+}
+
+async function loadBenchmark(){
+  const host = $("benchmark"); host.textContent = "loading…";
+  try{
+    const b = await get("/api/benchmark");
+    host.innerHTML = "";
+    if(b.note){ host.textContent = b.note; return; }
+    host.appendChild(el("p","hint", b.holdout_failures_scored + " held-out failing runs. Ground truth: "
+      + b.ground_truth + "."));
+    const e = b.engine || {}, base = b.baselines || {};
+    host.appendChild(tableFrom([
+      ["Postmortem — exact breaking step", (e.breaking_step_exact??0).toFixed(3)],
+      ["baseline: blame the last step", (base.blame_the_last_step??0).toFixed(3)],
+      ["baseline: blame the first failing call", (base.blame_the_first_failing_call??0).toFixed(3)],
+      ["Postmortem — diagnosis (label kind)", (e.label_kind??0).toFixed(3)],
+      ["baseline: output only, majority diagnosis", (base.output_only_majority_kind??0).toFixed(3)],
+      ["Postmortem — fault class", (e.fault_class??0).toFixed(3)],
+    ], ["what is measured","accuracy"]));
+    host.appendChild(el("h3","","Diagnosis recall by kind"));
+    host.appendChild(tableFrom(Object.entries(b.label_kind_recall||{}).map(([k,v]) =>
+      [pretty(k), v.total, (v.recall??0).toFixed(3)]), ["diagnosis","runs","recall"]));
+    host.appendChild(el("h3","","Where the answer came from"));
+    host.appendChild(tableFrom(Object.entries(b.by_layer||{}).map(([k,v]) =>
+      [k, v.traces, (v.step_exact??0).toFixed(3)]), ["layer","runs","step accuracy"]));
+  } catch(e){ host.innerHTML=""; host.appendChild(el("span","err",e.message)); }
+}
+
+async function loadCorpus(){
+  const host = $("corpus"); host.textContent = "loading…";
+  try{
+    const s = await get("/api/stats");
+    host.innerHTML = "";
+    const c = s.corpus || {};
+    host.appendChild(tableFrom([
+      ["trajectories", c.trajectories ?? 0],
+      ["steps", c.steps ?? 0],
+      ["failures", c.failures ?? 0],
+      ["failures with a replay-found breaking step", c.failures_with_a_replay_label ?? 0],
+      ["seconds spent labelling by replay", c.seconds_total ?? 0],
+    ], ["corpus","value"]));
+    host.appendChild(el("h3","","Diagnoses found by replay"));
+    host.appendChild(tableFrom(Object.entries(c.label_kinds||{}).map(([k,v])=>[pretty(k),v]), ["diagnosis","runs"]));
+    host.appendChild(el("h3","","Agent behaviours in the harness"));
+    host.appendChild(tableFrom(Object.entries(s.policies||{}).map(([k,v])=>[k, pretty(v)||"meant to succeed"]),
+      ["behaviour","built to fail by"]));
+    host.appendChild(el("p","hint","These behaviours are scripted, not a model. The traces are real "
+      + "executions against real verifiers; a model arm runs through the same tools when a GPU is free."));
+  } catch(e){ host.innerHTML=""; host.appendChild(el("span","err",e.message)); }
+}
+
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$("theme").onclick = () => {
+  const next = document.documentElement.getAttribute("data-theme")==="dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try{ localStorage.setItem("pm-theme", next); }catch(e){}
+};
+try{ const t=localStorage.getItem("pm-theme"); if(t) document.documentElement.setAttribute("data-theme",t); }catch(e){}
+
+get("/api/stats").then(s => {
+  $("chip-lib").textContent = (s.library.trajectories||0) + " labelled runs indexed";
+  (s.tasks||[]).forEach(t => { const o=document.createElement("option"); o.value=t; o.textContent=t; $("task").appendChild(o); });
+  Object.entries(s.policies||{}).forEach(([k,v]) => {
+    const o=document.createElement("option"); o.value=k; o.textContent=k.replace(/_/g," ") + (v ? " — " + pretty(v) : " — meant to succeed");
+    $("policy").appendChild(o);
+  });
+  $("policy").value = "wrong_file";
+  $("policy-note").textContent = "Each behaviour is scripted to produce one failure shape; the sandbox and verifier are real.";
+}).catch(()=>{ $("chip-lib").textContent = "corpus unavailable"; });
+</script>
+</body>
+</html>
