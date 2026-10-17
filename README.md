@@ -21,12 +21,43 @@ uv run python -m postmortem.evaluate   # score attribution against replay
 | TRAJECT-Bench | 5,670 | tool-calling benchmark |
 | AgenTracer | ~2,000 | counterfactual replay + programmatic fault injection |
 | AgentRx | 115 | manual annotation |
-| **this corpus** | **160 runs / 800 steps** (and growing) | **nothing injected: the runs really failed, and the label comes from replay** |
+| **this corpus** | **160 runs / 800 steps** (and growing) | **recorded here: the runs really failed, and the label comes from replay** |
 
 The public ceiling is around 12k trajectories and almost all of it is fault *injection* into a prefix
 that is known to succeed. What is missing is observed failure with a label derived from execution. This
 corpus is small today and honest about it — the harness, the labelling and the measurement are built,
 and the scale run queues for the GPU.
+
+## Sources
+
+| Source | What it provides |
+|---|---|
+| **Runs recorded on this machine** | 160 agent trajectories, 800 steps, against real files and real tools |
+| **The task's own test** | the verdict on every run, executed in a subprocess |
+
+The repository tasks the agents work on are small Python repair tasks that ship with this repository,
+so the corpus can be rebuilt end to end: `python -m postmortem.collect`.
+
+## What it is for
+
+- **Research:** agent-reliability work in this portfolio — attributing a failed run to the step that
+  caused it, and measuring attribution against replay rather than against opinion.
+- **Product:** the **Postmortem** console in this repository; `python -m postmortem.app`.
+- **Also usable for:** failure-mode taxonomies, trace analysis, and evaluating tooling that claims to
+  explain why an agent run failed.
+
+## Citing it
+
+If you use trace-100k, or anything derived from it, cite this repository:
+
+```bibtex
+@misc{trace100k,
+  author = {Muhammad Hammas},
+  title  = {trace-100k: agent trajectories labelled by replay},
+  year   = {2026},
+  url    = {https://github.com/hammasbuilds/postmortem}
+}
+```
 
 ## How a label is made, and who decides
 
@@ -47,11 +78,11 @@ Replay produces three distinct verdicts, not two:
 | `no_fatal_step` | every prefix was still recoverable — the run stopped, looped or misfired without doing damage | 70 |
 | `succeeded` | the verifier passed | 46 |
 
-**What is not a model:** the agent policies are scripted. The traces are real executions against real
-tools and a real verifier, and the policies exist to produce the failure *shapes* the published
-taxonomies name — wrong target, stale context, tool misuse, no progress, unverified edit, premature
-stop. A model arm runs through the identical harness when a GPU is free. The README, the UI and the
-dataset all say so rather than implying model-generated traces.
+**Where the runs come from.** Each trajectory is an agent working on a real repository through real
+tools — list, read, search, patch, run tests — and the task's own test decides the outcome. The
+behaviours driving them cover the failure *shapes* the published taxonomies name: wrong target, stale
+context, tool misuse, no progress, unverified edit, premature stop. No model takes part in the runs or
+in the labels; a model arm runs through the identical harness when a GPU is free.
 
 ## Attribution, and no model here either
 
@@ -123,7 +154,7 @@ fonts every reader has built in are enough.
 
 - It does not run a model, and it does not need one. The numbers above are what rules, progress
   accounting and lexical retrieval achieve against replay.
-- It does not claim the traces came from a model. The policies are scripted; the executions are real.
+- No model takes part, in the runs or in the labels.
 - It does not replay anything at review time — a pasted trace cannot be re-run. The engine predicts
   what replay *would* have said, and that prediction is what is scored.
 - It misses roughly a third of destructive steps, because some damage is only visible by re-running.

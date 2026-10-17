@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: "trace-100k and Postmortem"
+message: "If you use this dataset or software, please cite it."
+type: dataset
+authors:
+  - family-names: Hammas
+    given-names: Muhammad
+    alias: hammasbuilds
+repository-code: "https://github.com/hammasbuilds/postmortem"
+year: 2026
+keywords:
+  - llm-agents
+  - failure-attribution
+  - trajectories
