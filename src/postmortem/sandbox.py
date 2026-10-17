@@ -145,6 +145,173 @@ TASKS: list[Task] = [
         fix_hint="ROWS.get(name.lower())",
         broken_line="ROWS.get(name)",
     ),
+    Task(
+        name="wrong-comparison",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/limits.py": (
+                "def within_budget(spent, budget):\n"
+                "    \"\"\"True when spending is at or under budget.\"\"\"\n"
+                "    return spent < budget\n"
+            ),
+            "pkg/fmt.py": "def money(x):\n    return f'${x:.2f}'\n",
+        },
+        target_file="pkg/limits.py",
+        test_source=(
+            "from pkg.limits import within_budget\n"
+            "assert within_budget(10, 10) is True, within_budget(10, 10)\n"
+            "assert within_budget(11, 10) is False\n"
+        ),
+        fix_hint="return spent <= budget",
+        broken_line="return spent < budget",
+    ),
+    Task(
+        name="mutable-default",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/collect.py": (
+                "def add_tag(tag, tags=[]):\n"
+                "    tags.append(tag)\n"
+                "    return tags\n"
+            ),
+            "pkg/text.py": "def shout(s):\n    return s.upper()\n",
+        },
+        target_file="pkg/collect.py",
+        test_source=(
+            "from pkg.collect import add_tag\n"
+            "assert add_tag('a') == ['a']\n"
+            "assert add_tag('b') == ['b'], 'the default list is shared between calls'\n"
+        ),
+        fix_hint="def add_tag(tag, tags=None):\n    tags = [] if tags is None else tags",
+        broken_line="def add_tag(tag, tags=[]):",
+    ),
+    Task(
+        name="swapped-arguments",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/geo.py": (
+                "def point(lat, lon):\n"
+                "    return {'lat': lat, 'lon': lon}\n\n\n"
+                "def from_pair(pair):\n"
+                "    return point(pair[1], pair[0])\n"
+            ),
+            "pkg/util.py": "def first(xs):\n    return xs[0]\n",
+        },
+        target_file="pkg/geo.py",
+        test_source=(
+            "from pkg.geo import from_pair\n"
+            "assert from_pair((24.86, 67.01)) == {'lat': 24.86, 'lon': 67.01}, from_pair((24.86, 67.01))\n"
+        ),
+        fix_hint="return point(pair[0], pair[1])",
+        broken_line="return point(pair[1], pair[0])",
+    ),
+    Task(
+        name="empty-input-crash",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/stats.py": (
+                "def average(xs):\n"
+                "    return sum(xs) / len(xs)\n"
+            ),
+            "pkg/seq.py": "def head(xs, n):\n    return xs[:n]\n",
+        },
+        target_file="pkg/stats.py",
+        test_source=(
+            "from pkg.stats import average\n"
+            "assert average([2, 4]) == 3\n"
+            "assert average([]) == 0, 'an empty list has no average to divide by'\n"
+        ),
+        fix_hint="return sum(xs) / len(xs) if xs else 0",
+        broken_line="return sum(xs) / len(xs)",
+    ),
+    Task(
+        name="wrong-aggregation",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/report.py": (
+                "def busiest(counts):\n"
+                "    \"\"\"Return the key with the highest count.\"\"\"\n"
+                "    return min(counts, key=counts.get)\n"
+            ),
+            "pkg/fmt.py": "def pct(x):\n    return f'{x:.0%}'\n",
+        },
+        target_file="pkg/report.py",
+        test_source=(
+            "from pkg.report import busiest\n"
+            "assert busiest({'mon': 3, 'tue': 9, 'wed': 1}) == 'tue', busiest({'mon': 3, 'tue': 9, 'wed': 1})\n"
+        ),
+        fix_hint="return max(counts, key=counts.get)",
+        broken_line="return min(counts, key=counts.get)",
+    ),
+    Task(
+        name="inverted-condition",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/access.py": (
+                "BLOCKED = {'guest'}\n\n\n"
+                "def may_enter(user):\n"
+                "    return user in BLOCKED\n"
+            ),
+            "pkg/util.py": "def tidy(s):\n    return s.strip()\n",
+        },
+        target_file="pkg/access.py",
+        test_source=(
+            "from pkg.access import may_enter\n"
+            "assert may_enter('admin') is True, may_enter('admin')\n"
+            "assert may_enter('guest') is False\n"
+        ),
+        fix_hint="return user not in BLOCKED",
+        broken_line="return user in BLOCKED",
+    ),
+    Task(
+        name="shadowed-name",
+        files={
+            "pkg/__init__.py": "",
+            # The shadow has to be at module level to do any damage: a name bound
+            # inside a function shadows nothing for its neighbours, and the first
+            # version of this task passed its own test before any fix was applied.
+            "pkg/build.py": (
+                "max = ''\n\n\n"
+                "def longest(words):\n"
+                "    best = ''\n"
+                "    for w in words:\n"
+                "        if len(w) > len(best):\n"
+                "            best = w\n"
+                "    return best\n\n\n"
+                "def widest(rows):\n"
+                "    return max(len(r) for r in rows)\n"
+            ),
+            "pkg/text.py": "def words(s):\n    return s.split()\n",
+        },
+        target_file="pkg/build.py",
+        test_source=(
+            "from pkg.build import longest, widest\n"
+            "assert longest(['a', 'bbb', 'cc']) == 'bbb'\n"
+            "assert widest([[1], [1, 2, 3]]) == 3, 'max was shadowed at module level'\n"
+        ),
+        fix_hint="",
+        broken_line="max = ''\n\n\n",
+    ),
+    Task(
+        name="missing-membership-test",
+        files={
+            "pkg/__init__.py": "",
+            "pkg/settings.py": (
+                "VALUES = {'theme': 'dark'}\n\n\n"
+                "def get(name, default=None):\n"
+                "    return VALUES[name]\n"
+            ),
+            "pkg/cfg.py": "DEFAULTS = {'theme': 'light'}\n",
+        },
+        target_file="pkg/settings.py",
+        test_source=(
+            "from pkg.settings import get\n"
+            "assert get('theme') == 'dark'\n"
+            "assert get('font', 'serif') == 'serif', 'a missing key should fall back, not raise'\n"
+        ),
+        fix_hint="return VALUES.get(name, default)",
+        broken_line="return VALUES[name]",
+    ),
 ]
 
 
