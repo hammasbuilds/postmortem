@@ -1,19 +1,17 @@
 """A real sandbox: real files, real tools, a real verifier.
 
-Postmortem's dataset has to be *observed* failures, not faults injected into a
-replayed success. That means something has to actually run and actually fail.
+Postmortem's dataset is built from *observed* failures: something has to actually
+run and actually fail before there is anything to attribute.
 
 So each task here is a small broken Python module plus a test that decides the
 outcome by executing the code. An agent works on a real temporary directory
 through real tools (list, read, grep, patch, run tests), and the verifier's
 verdict is the label - nobody writes "this failed" by hand.
 
-What is *not* a model: the agent policies (``policies.py``) are scripted. That
-is stated everywhere this corpus is described, because "real trace, scripted
-policy" and "model-generated trace" are different claims. The policies exist to
-produce the failure *shapes* a real agent produces - wrong file, stale context,
-loop, budget exhaustion, premature success - and the harness is the same one a
-model arm will run through when the GPU frees.
+No model takes part. The agent behaviours in ``policies.py`` are written out, each
+one to produce a failure *shape* a real agent produces - wrong file, stale
+context, loop, budget exhaustion, premature success - and the harness is the same
+one a model arm will run through when the GPU frees.
 """
 
 from __future__ import annotations

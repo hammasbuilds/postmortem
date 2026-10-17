@@ -119,7 +119,7 @@ def evaluate(data_dir: Path = DEFAULT_DATA) -> dict:
         "fault_confusion_top": dict(confusion.most_common(10)),
         "ground_truth": "replay: every prefix re-run and handed to the verifier",
         "model_used": None,
-        "policies_are_scripted": True,
+        "model_took_part": False,
     }
 
 

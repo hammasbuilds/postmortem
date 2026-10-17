@@ -398,8 +398,8 @@ async function loadCorpus(){
     host.appendChild(el("h3","","Agent behaviours in the harness"));
     host.appendChild(tableFrom(Object.entries(s.policies||{}).map(([k,v])=>[k, pretty(v)||"meant to succeed"]),
       ["behaviour","built to fail by"]));
-    host.appendChild(el("p","hint","These behaviours are scripted, not a model. The traces are real "
-      + "executions against real verifiers; a model arm runs through the same tools when a GPU is free."));
+    host.appendChild(el("p","hint","We built this corpus: every trace is a real run against real tools "
+      + "and a real verifier. No model takes part; a model arm runs through the same tools when a GPU is free."));
   } catch(e){ host.innerHTML=""; host.appendChild(el("span","err",e.message)); }
 }
 
@@ -419,7 +419,7 @@ get("/api/stats").then(s => {
     $("policy").appendChild(o);
   });
   $("policy").value = "wrong_file";
-  $("policy-note").textContent = "Each behaviour is scripted to produce one failure shape; the sandbox and verifier are real.";
+  $("policy-note").textContent = "Each behaviour produces one failure shape; the sandbox and the verifier are real.";
 }).catch(()=>{ $("chip-lib").textContent = "corpus unavailable"; });
 </script>
 </body>

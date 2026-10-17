@@ -1,9 +1,9 @@
-"""Scripted agent policies: the failure shapes a real agent produces.
+"""Agent behaviours: the failure shapes a real agent produces.
 
-Each policy is a generator of intents over the sandbox. They are **not** models,
-and the dataset says so. They exist because the attribution engine has to be
-built and measured against failures whose cause is known by construction, and
-because the same harness will later run a model arm through the identical tools.
+Each behaviour drives the sandbox through real tools. No model takes part. They
+exist because the attribution engine has to be built and measured against
+failures whose cause is known by construction, and because the same harness will
+later run a model arm through the identical tools.
 
 The named failure modes come from the published taxonomies of agent failure
 (wrong target, stale context, tool misuse, loop/no-progress, budget exhaustion,
