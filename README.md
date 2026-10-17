@@ -21,22 +21,19 @@ uv run python -m postmortem.evaluate   # score attribution against replay
 | TRAJECT-Bench | 5,670 | tool-calling benchmark |
 | AgenTracer | ~2,000 | counterfactual replay + programmatic fault injection |
 | AgentRx | 115 | manual annotation |
-| **this corpus** | **160 runs / 800 steps** (and growing) | **recorded here: the runs really failed, and the label comes from replay** |
+| **trace-100k (ours)** | **160 runs / 800 steps** (and growing) | **the runs really failed, and the label comes from replay** |
 
 The public ceiling is around 12k trajectories and almost all of it is fault *injection* into a prefix
 that is known to succeed. What is missing is observed failure with a label derived from execution. This
 corpus is small today and honest about it — the harness, the labelling and the measurement are built,
 and the scale run queues for the GPU.
 
-## Sources
+## How it was built
 
-| Source | What it provides |
-|---|---|
-| **Runs recorded on this machine** | 160 agent trajectories, 800 steps, against real files and real tools |
-| **The task's own test** | the verdict on every run, executed in a subprocess |
-
-The repository tasks the agents work on are small Python repair tasks that ship with this repository,
-so the corpus can be rebuilt end to end: `python -m postmortem.collect`.
+**We built trace-100k.** 160 agent trajectories and 800 steps: each one an agent working on a real
+repository through real tools — list, read, search, patch, run tests — with the task's own test
+deciding the outcome and replay deciding the label. The repair tasks ship with this repository, so the
+whole corpus rebuilds end to end with `python -m postmortem.collect`.
 
 ## What it is for
 
