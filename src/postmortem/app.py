@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import random
 import re
@@ -21,6 +22,9 @@ from .web import App, Raw
 UI_DIR = Path(__file__).resolve().parent.parent.parent / "ui"
 DEFAULT_DATA = Path("C:/d drive data/trace-100k/v1")
 SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+# How many runs one batch call will attribute. Past this the caller is told what
+# was left rather than waiting on a request that never seems to end.
+MAX_BATCH_RUNS = 500
 
 
 def build_app(data_dir: Path = DEFAULT_DATA) -> App:
@@ -115,6 +119,71 @@ def build_app(data_dir: Path = DEFAULT_DATA) -> App:
         last.clear()
         last.update(out)
         return {"attribution": a.to_dict(), "steps": len(trace.get("steps", []))}
+
+    @app.route("/api/batch")
+    def _batch(payload: dict) -> dict:
+        """Attribute many runs at once and say which failure dominates.
+
+        One trace at a time answers "why did this run fail". A team with a
+        nightly agent has four hundred of them and a different question: which
+        failure is costing most, and is it getting worse. That is a count over
+        runs, so this returns the counts rather than four hundred verdicts.
+        """
+        raw = payload.get("text") or ""
+        traces: list[dict] = []
+        broken = 0
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                broken += 1
+                continue
+            if isinstance(row, dict) and "steps" in row:
+                traces.append(row)
+            else:
+                broken += 1
+
+        if not traces:
+            return {"error": "no runs found - paste one JSON trace per line",
+                    "unreadable_lines": broken}
+
+        limit = int(payload.get("limit", MAX_BATCH_RUNS))
+        over = max(0, len(traces) - limit)
+        by_fault: collections.Counter = collections.Counter()
+        by_kind: collections.Counter = collections.Counter()
+        by_task: collections.Counter = collections.Counter()
+        rows = []
+        for trace in traces[:limit]:
+            a = attribute(trace, library)
+            by_fault[a.fault_class or "(none)"] += 1
+            by_kind[a.label_kind] += 1
+            by_task[str(trace.get("task", ""))[:40] or "(unnamed)"] += 1
+            rows.append({
+                "task": trace.get("task", ""),
+                "outcome": trace.get("outcome", ""),
+                "steps": len(trace.get("steps", [])),
+                "breaking_step": a.breaking_step,
+                "first_wrong_step": a.first_wrong_step,
+                "label_kind": a.label_kind,
+                "fault_class": a.fault_class,
+                "confidence": round(a.confidence, 3),
+                "advice": a.advice,
+            })
+        failures = [r for r in rows if r["outcome"] != "success"]
+        return {
+            "runs_given": len(traces),
+            "runs_done": len(rows),
+            "runs_skipped": over,
+            "unreadable_lines": broken,
+            "failures": len(failures),
+            "by_fault_class": dict(by_fault.most_common()),
+            "by_diagnosis": dict(by_kind.most_common()),
+            "by_task": dict(by_task.most_common(10)),
+            "rows": rows,
+        }
 
     def _report(payload: dict, kind: str) -> Raw:
         if not last:

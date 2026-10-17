@@ -103,6 +103,7 @@ footer{background:var(--panel);border-top:1px solid var(--line);color:var(--mute
   <nav id="tabs">
     <button data-tab="analyse" aria-selected="true">Analyse</button>
     <button data-tab="paste" aria-selected="false">Paste a trace</button>
+    <button data-tab="batch" aria-selected="false">Batch</button>
     <button data-tab="report" aria-selected="false">Report</button>
     <button data-tab="benchmark" aria-selected="false">Benchmark</button>
     <button data-tab="corpus" aria-selected="false">Corpus</button>
@@ -167,6 +168,28 @@ footer{background:var(--panel);border-top:1px solid var(--line);color:var(--mute
       <p class="hint" id="paste-note"></p>
     </section>
 
+    <section id="panel-batch" class="card hidden">
+      <h2>Many runs at once</h2>
+      <p class="hint">One JSON run per line - the shape an export writes. The answer is counts
+         across runs: which failure dominates, and in which task.</p>
+      <label for="batch-json">Runs, one per line</label>
+      <textarea id="batch-json" spellcheck="false"></textarea>
+      <div class="drop" id="batch-drop">Drop a .jsonl of runs here, or click to choose
+        <input type="file" id="batch-file" accept=".jsonl,.json,.txt" class="hidden"
+          aria-label="Choose a file of runs to attribute"></div>
+      <div class="row">
+        <button class="btn primary" id="batch-run">Attribute them all</button>
+        <button class="btn" id="batch-sample">Load runs from the corpus</button>
+        <button class="btn" id="batch-csv">Download CSV</button>
+        <span class="hint" id="batch-note"></span>
+      </div>
+      <div id="batch-summary"></div>
+      <table id="batch-table" class="hidden">
+        <thead><tr><th>Task</th><th>Outcome</th><th>Steps</th><th>Diagnosis</th><th>Fault</th><th>Break</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
     <section id="panel-report" class="card hidden">
       <h2>Incident report</h2>
       <p class="hint">A report for the ticket: the verdict, the evidence, the step list and what to change.
@@ -217,7 +240,7 @@ const pretty = (s) => (s||"").replace(/_/g," ");
 
 function showTab(tab){
   document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected', String(b.dataset.tab===tab)));
-  ["analyse","paste","report","benchmark","corpus"].forEach(t => $("panel-"+t).classList.toggle("hidden", t!==tab));
+  ["analyse","paste","batch","report","benchmark","corpus"].forEach(t => $("panel-"+t).classList.toggle("hidden", t!==tab));
   $("panel-controls").classList.toggle("hidden", tab!=="analyse");
   if(tab==="benchmark") loadBenchmark();
   if(tab==="corpus") loadCorpus();
@@ -365,6 +388,93 @@ $("fill").onclick = () => {
     ]
   }, null, 1);
   $("paste-note").textContent = "example loaded — press Attribute";
+};
+
+let batchRows = [];
+
+$("batch-drop").onclick = () => $("batch-file").click();
+$("batch-file").onchange = (e) => { const f = e.target.files[0]; if(f) readBatch(f); };
+["dragenter","dragover"].forEach(ev => $("batch-drop").addEventListener(ev, e => {
+  e.preventDefault(); $("batch-drop").classList.add("hot"); }));
+["dragleave","drop"].forEach(ev => $("batch-drop").addEventListener(ev, e => {
+  e.preventDefault(); $("batch-drop").classList.remove("hot"); }));
+$("batch-drop").addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if(f) readBatch(f); });
+function readBatch(f){
+  const fr = new FileReader();
+  fr.onload = () => {
+    $("batch-json").value = fr.result;
+    const lines = String(fr.result).split(/\r?\n/).filter(l => l.trim()).length;
+    $("batch-note").textContent = f.name + " loaded - " + lines + " lines";
+  };
+  fr.readAsText(f);
+}
+
+$("batch-sample").onclick = async () => {
+  $("batch-sample").disabled = true;
+  try{
+    const runs = [];
+    for(let i = 0; i < 12; i++){
+      const ex = await get("/api/example");
+      if(ex && ex.trace) runs.push(JSON.stringify(ex.trace));
+    }
+    $("batch-json").value = runs.join("\n");
+    $("batch-note").textContent = runs.length + " runs loaded from the held-out split";
+  } catch(e){ $("batch-note").textContent = e.message; }
+  finally{ $("batch-sample").disabled = false; }
+};
+
+$("batch-run").onclick = async () => {
+  $("batch-run").disabled = true;
+  $("batch-note").textContent = "attributing…";
+  try{
+    const r = await post("/api/batch", {text: $("batch-json").value});
+    if(r.error){ $("batch-note").textContent = r.error; return; }
+    batchRows = r.rows || [];
+
+    const sum = $("batch-summary"); sum.innerHTML = "";
+    sum.appendChild(el("h3","","Which failure dominates"));
+    const total = batchRows.length || 1;
+    sum.appendChild(tableFrom(Object.entries(r.by_fault_class||{})
+      .map(([k,v]) => [pretty(k), v, (100*v/total).toFixed(0) + "%"]),
+      ["fault class","runs","share"]));
+    sum.appendChild(el("h3","","Diagnosis"));
+    sum.appendChild(tableFrom(Object.entries(r.by_diagnosis||{})
+      .map(([k,v]) => [pretty(k), v]), ["diagnosis","runs"]));
+    sum.appendChild(el("h3","","By task"));
+    sum.appendChild(tableFrom(Object.entries(r.by_task||{}).map(([k,v]) => [k, v]), ["task","runs"]));
+
+    const body = $("batch-table").querySelector("tbody"); body.innerHTML = "";
+    batchRows.slice(0,200).forEach(row => {
+      const tr = document.createElement("tr");
+      [row.task, row.outcome, row.steps, pretty(row.label_kind), pretty(row.fault_class),
+       row.breaking_step === null || row.breaking_step === undefined ? "none" : row.breaking_step]
+        .forEach((c,i) => { const td = document.createElement("td");
+          if(i >= 2) td.className = "num"; td.textContent = String(c); tr.appendChild(td); });
+      body.appendChild(tr);
+    });
+    $("batch-table").classList.remove("hidden");
+    $("batch-note").textContent = r.runs_done + " of " + r.runs_given + " runs · "
+      + r.failures + " failed"
+      + (r.runs_skipped ? " · " + r.runs_skipped + " over the limit" : "")
+      + (r.unreadable_lines ? " · " + r.unreadable_lines + " lines unreadable" : "");
+  } catch(e){ $("batch-note").textContent = e.message; }
+  finally{ $("batch-run").disabled = false; }
+};
+
+$("batch-csv").onclick = () => {
+  if(!batchRows.length){ $("batch-note").textContent = "Attribute some runs first."; return; }
+  const esc = (v) => '"' + String(v === null || v === undefined ? "" : v).replace(/"/g, '""') + '"';
+  const cols = ["task","outcome","steps","label_kind","fault_class","breaking_step",
+                "first_wrong_step","confidence","advice"];
+  const csv = [cols.map(esc).join(",")]
+    .concat(batchRows.map(r => cols.map(c => esc(r[c])).join(",")))
+    .join("\r\n");
+  const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "postmortem-batch.csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  $("batch-note").textContent = "downloaded " + a.download + " (" + batchRows.length + " runs)";
 };
 
 async function download(kind){

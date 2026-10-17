@@ -8,6 +8,8 @@ contradicted itself.
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from postmortem.attribute import Library, attribute
@@ -227,3 +229,55 @@ def test_markdown_report_states_both_facts():
     assert "Point of no return" in md
     assert "First wrong move" in md
     assert "What to change" in md
+
+
+# --- batch attribution ------------------------------------------------------
+
+
+def _app():
+    from postmortem.app import build_app
+
+    return build_app(pathlib.Path("tests") / "no-such-corpus")
+
+
+def test_batch_attributes_every_run_and_counts_the_faults():
+    """One trace answers 'why did this run fail'. A team with a nightly agent has
+    four hundred and a different question: which failure dominates."""
+    import json as _json
+
+    runs = [
+        {"outcome": "failure", "task": "a", "steps": [
+            step("patch", True), step("run_tests", False, output="SyntaxError", error="tests failed")]},
+        {"outcome": "failure", "task": "a", "steps": [
+            step("grep", True, args={"pattern": "x"}) for _ in range(4)] + [
+            step("run_tests", False, error="tests failed")]},
+        {"outcome": "success", "task": "b", "steps": [step("run_tests", True)]},
+    ]
+    out = _app().routes["/api/batch"]({"text": "\n".join(_json.dumps(r) for r in runs)})
+    assert out["runs_given"] == 3
+    assert out["runs_done"] == 3
+    assert out["failures"] == 2
+    assert sum(out["by_fault_class"].values()) == 3
+    assert out["by_diagnosis"].get("succeeded") == 1
+    assert set(out["by_task"]) == {"a", "b"}
+
+
+def test_batch_counts_unreadable_lines_instead_of_dropping_them():
+    out = _app().routes["/api/batch"]({"text": '{"outcome":"failure","steps":[]}\nnot json at all\n{}'})
+    assert out["runs_done"] == 1
+    assert out["unreadable_lines"] == 2, "a line that could not be read has to be reported"
+
+
+def test_batch_with_nothing_usable_explains_itself():
+    out = _app().routes["/api/batch"]({"text": "not json\nalso not json"})
+    assert "error" in out
+    assert out["unreadable_lines"] == 2
+
+
+def test_batch_caps_the_work_and_says_what_was_left():
+    import json as _json
+
+    run = _json.dumps({"outcome": "failure", "task": "a", "steps": [step("run_tests", False)]})
+    out = _app().routes["/api/batch"]({"text": "\n".join([run] * 9), "limit": 4})
+    assert out["runs_done"] == 4
+    assert out["runs_skipped"] == 5
