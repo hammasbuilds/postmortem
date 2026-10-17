@@ -28,6 +28,9 @@ that is known to succeed. What is missing is observed failure with a label deriv
 corpus is small today and honest about it — the harness, the labelling and the measurement are built,
 and the scale run queues for the GPU.
 
+**The dataset itself is on Kaggle:** https://www.kaggle.com/datasets/muhammadhammas13/trace-100k
+It is not in this repository - this repository is the harness that builds, labels and reads it.
+
 ## How it was built
 
 **We built trace-100k.** 160 agent trajectories and 800 steps: each one an agent working on a real
