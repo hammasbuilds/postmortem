@@ -21,7 +21,7 @@ uv run python -m postmortem.evaluate   # score attribution against replay
 | TRAJECT-Bench | 5,670 | tool-calling benchmark |
 | AgenTracer | ~2,000 | counterfactual replay + programmatic fault injection |
 | AgentRx | 115 | manual annotation |
-| **trace-100k (ours)** | **160 runs / 800 steps** (and growing) | **the runs really failed, and the label comes from replay** |
+| **trace-100k (ours)** | **416 runs / 2,080 steps** (and growing) | **the runs really failed, and the label comes from replay** |
 
 The public ceiling is around 12k trajectories and almost all of it is fault *injection* into a prefix
 that is known to succeed. What is missing is observed failure with a label derived from execution. This
@@ -33,10 +33,11 @@ It is not in this repository - this repository is the harness that builds, label
 
 ## How it was built
 
-**We built trace-100k.** 160 agent trajectories and 800 steps: each one an agent working on a real
+**We built trace-100k.** 416 agent trajectories and 2,080 steps: each one an agent working on a real
 repository through real tools — list, read, search, patch, run tests — with the task's own test
-deciding the outcome and replay deciding the label. The repair tasks ship with this repository, so the
-whole corpus rebuilds end to end with `python -m postmortem.collect`.
+deciding the outcome and replay deciding the label. 13 repair tasks, 8 behaviours, 768 seconds of real
+verifier runs to label. The tasks ship with this repository, so the whole corpus rebuilds end to end
+with `python -m postmortem.collect`.
 
 ## What it is for
 
@@ -74,9 +75,9 @@ Replay produces three distinct verdicts, not two:
 
 | Verdict | Meaning | In this corpus |
 |---|---|---|
-| `destructive_step` | a step left the repository in a state recovery cannot fix | 44 |
-| `no_fatal_step` | every prefix was still recoverable — the run stopped, looped or misfired without doing damage | 70 |
-| `succeeded` | the verifier passed | 46 |
+| `destructive_step` | a step left the repository in a state recovery cannot fix | 120 |
+| `no_fatal_step` | every prefix was still recoverable — the run stopped, looped or misfired without doing damage | 177 |
+| `succeeded` | the verifier passed | 119 |
 
 **Where the runs come from.** Each trajectory is an agent working on a real repository through real
 tools — list, read, search, patch, run tests — and the task's own test decides the outcome. The
@@ -99,20 +100,29 @@ reports up to 76% higher attribution accuracy from whole traces), so the engine 
 
 ## Measured against replay
 
-36 held-out failing runs. The engine never sees the replay labels, and the retrieval library is a
+84 held-out failing runs. The engine never sees the replay labels, and the retrieval library is a
 disjoint split.
 
 | | |
 |---|---|
-| Point of no return, exactly right | **0.861** |
-| baseline: blame the last step | 0.056 |
-| baseline: blame the first failing call | 0.111 |
-| Diagnosis (which of the three verdicts) | **0.861** |
-| baseline: output-only, predict the majority verdict | 0.639 |
-| Fault class | **0.971** |
+| Point of no return, exactly right | **0.821** |
+| baseline: blame the last step | 0.083 |
+| baseline: blame the first failing call | 0.155 |
+| Diagnosis (which of the three verdicts) | **0.821** |
+| baseline: output-only, predict the majority verdict | 0.655 |
+| Fault class | **0.987** |
 
-Recall by verdict: `no_fatal_step` 1.000 (23/23), `destructive_step` 0.615 (8/13) — the remaining
-misses are runs where the damage is visible only to replay, not to the trace.
+Recall by verdict: `no_fatal_step` 1.000 (55/55), `destructive_step` 0.483 (14/29).
+
+The headline fell from 0.861 to 0.821 when the corpus went from 5 kinds of bug to 13, and that is the
+more honest number: the first one was measured on a corpus too narrow to disagree with it.
+
+**The known limit** is destructive_step recall. The engine's only trace-visible sign of damage is an
+applied edit followed by a check that cannot load the code, so it misses the runs where the damage
+shows up as a wrong answer rather than a broken import. Generalising the rule to "any failure that is
+not an assertion" was tried and measured worse — it took the point of no return from 0.821 to 0.595
+and `no_fatal_step` recall from 1.000 to 0.655, because a recoverable run often raises too. Some damage
+is visible only to replay, and the number says so rather than hiding it.
 
 ## Input → Output
 
