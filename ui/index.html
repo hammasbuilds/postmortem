@@ -67,7 +67,7 @@ ol.steps li .why{display:block;color:var(--muted);font-size:12.5px;margin-top:3p
 .why{display:block;color:var(--muted);font-size:12.5px;margin-top:3px}
 .args{display:block;font:11.5px/1.5 var(--mono);color:var(--muted);margin-top:3px;
   white-space:pre-wrap;word-break:break-word}
-.copy{font-size:11.5px;padding:3px 9px;border-radius:7px;border:1px solid var(--line);
+.copy{font-size:11.5px;padding:7px 11px;min-height:28px;border-radius:7px;border:1px solid var(--line);
   background:var(--bg);color:var(--muted);cursor:pointer;margin-left:8px}
 .copy:hover{color:var(--ink)}
 .badge{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;margin-left:6px;border:1px solid var(--line)}
@@ -85,6 +85,7 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
   color:var(--muted);font-size:13px;margin-top:10px;cursor:pointer}
 .drop.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
 .hidden{display:none}
+footer a{display:inline-block;padding:6px 2px;color:var(--accent);text-decoration:underline}  /* the browser default link blue sits at 1.7:1 on a dark footer */
 footer{background:var(--panel);border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;padding:14px 0}
 </style>
 </head>
@@ -153,9 +154,11 @@ footer{background:var(--panel);border-top:1px solid var(--line);color:var(--mute
       <h2>Paste a trace</h2>
       <p class="hint">A JSON object with a <code>steps</code> list; each step needs <code>tool</code>,
          <code>ok</code>, and optionally <code>args</code>, <code>error</code>, <code>intent</code>.</p>
+      <label for="json">The trace, as JSON</label>
       <textarea id="json" spellcheck="false"></textarea>
       <div class="drop" id="drop">Drop a .json trace here, or click to choose a file
-        <input type="file" id="file" accept=".json,.jsonl,.txt" class="hidden"></div>
+        <input type="file" id="file" accept=".json,.jsonl,.txt" class="hidden"
+          aria-label="Choose a trace file to attribute"></div>
       <div class="row">
         <button class="btn primary" id="attribute">Attribute</button>
         <button class="btn" id="fill">Fill with an example</button>
