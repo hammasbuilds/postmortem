@@ -64,6 +64,12 @@ ol.steps li.ok{border-left-color:var(--ok)}
 ol.steps li.fail{border-left-color:var(--bad);background:var(--bad-soft)}
 ol.steps li.break{border-left-color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent)}
 ol.steps li .why{display:block;color:var(--muted);font-size:12.5px;margin-top:3px}
+.why{display:block;color:var(--muted);font-size:12.5px;margin-top:3px}
+.args{display:block;font:11.5px/1.5 var(--mono);color:var(--muted);margin-top:3px;
+  white-space:pre-wrap;word-break:break-word}
+.copy{font-size:11.5px;padding:3px 9px;border-radius:7px;border:1px solid var(--line);
+  background:var(--bg);color:var(--muted);cursor:pointer;margin-left:8px}
+.copy:hover{color:var(--ink)}
 .badge{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;margin-left:6px;border:1px solid var(--line)}
 .badge.break{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:700}
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -75,6 +81,9 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .truth.miss{background:var(--warn-soft)}
 .hint{color:var(--muted);font-size:12.5px}
 .err{color:var(--bad)}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:14px;text-align:center;
+  color:var(--muted);font-size:13px;margin-top:10px;cursor:pointer}
+.drop.hot{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
 .hidden{display:none}
 footer{background:var(--panel);border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;padding:14px 0}
 </style>
@@ -121,7 +130,8 @@ footer{background:var(--panel);border-top:1px solid var(--line);color:var(--mute
     <section id="panel-analyse">
       <div class="card">
         <h2>Verdict</h2>
-        <div class="verdict" id="verdict"><span class="hint">Run a trajectory, or load a recorded one.</span></div>
+        <div class="row" style="margin:0 0 8px"><button class="copy" id="copy-verdict">Copy verdict</button></div>
+      <div class="verdict" id="verdict"><span class="hint">Run a trajectory, or load a recorded one.</span></div>
         <div class="kpis" id="kpis"></div>
         <div id="truth"></div>
       </div>
@@ -144,9 +154,12 @@ footer{background:var(--panel);border-top:1px solid var(--line);color:var(--mute
       <p class="hint">A JSON object with a <code>steps</code> list; each step needs <code>tool</code>,
          <code>ok</code>, and optionally <code>args</code>, <code>error</code>, <code>intent</code>.</p>
       <textarea id="json" spellcheck="false"></textarea>
+      <div class="drop" id="drop">Drop a .json trace here, or click to choose a file
+        <input type="file" id="file" accept=".json,.jsonl,.txt" class="hidden"></div>
       <div class="row">
         <button class="btn primary" id="attribute">Attribute</button>
         <button class="btn" id="fill">Fill with an example</button>
+        <button class="btn" id="clear-json">Clear</button>
       </div>
       <p class="hint" id="paste-note"></p>
     </section>
@@ -178,7 +191,9 @@ footer{background:var(--panel);border-top:1px solid var(--line);color:var(--mute
 </div>
 </main>
 
-<footer><div class="wrap">Postmortem · labels come from replaying each prefix against the task's own verifier</div></footer>
+<footer><div class="wrap">Postmortem · labels come from replaying each prefix against the task's own
+  verifier · <a href="https://www.kaggle.com/datasets/muhammadhammas13/trace-100k" target="_blank"
+  rel="noopener">trace-100k on Kaggle</a></div></footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -260,6 +275,8 @@ function renderVerdict(a, truth, extra){
     if(n.index===a.first_wrong_step) li.appendChild(el("span","badge","first wrong move"));
     if(n.repeat>1) li.appendChild(el("span","badge","repeat "+n.repeat));
     li.appendChild(el("span","why", (n.ok ? n.effect : "failed") + (n.error ? " — " + n.error : "")));
+    const argText = Object.entries(n.args || {}).map(([k,v]) => k + "=" + v).join("   ");
+    if(argText) li.appendChild(el("span","args", argText));
     ol.appendChild(li);
   });
 
@@ -310,6 +327,28 @@ $("attribute").onclick = async () => {
   } catch(e){ $("paste-note").textContent = e.message; }
   finally{ $("attribute").disabled = false; }
 };
+
+$("drop").onclick = () => $("file").click();
+$("file").onchange = (e) => { const f = e.target.files[0]; if(f) readTrace(f); };
+["dragenter","dragover"].forEach(ev => $("drop").addEventListener(ev, e => {
+  e.preventDefault(); $("drop").classList.add("hot"); }));
+["dragleave","drop"].forEach(ev => $("drop").addEventListener(ev, e => {
+  e.preventDefault(); $("drop").classList.remove("hot"); }));
+$("drop").addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if(f) readTrace(f); });
+function readTrace(f){
+  const fr = new FileReader();
+  fr.onload = () => {
+    $("json").value = fr.result;
+    // A .jsonl export holds one run per line; attribute the first of them.
+    if(f.name.endsWith(".jsonl")){
+      const first = String(fr.result).split(/\r?\n/).find(l => l.trim());
+      if(first) $("json").value = first;
+    }
+    $("paste-note").textContent = f.name + " loaded - press Attribute";
+  };
+  fr.readAsText(f);
+}
+$("clear-json").onclick = () => { $("json").value = ""; $("paste-note").textContent = ""; };
 
 $("fill").onclick = () => {
   $("json").value = JSON.stringify({
@@ -402,6 +441,24 @@ async function loadCorpus(){
       + "and a real verifier. No model takes part; a model arm runs through the same tools when a GPU is free."));
   } catch(e){ host.innerHTML=""; host.appendChild(el("span","err",e.message)); }
 }
+
+$("copy-verdict").onclick = async () => {
+  if(!state || !state.attribution){ return; }
+  const a = state.attribution;
+  const lines = [
+    (a.breaking_step !== null && a.breaking_step !== undefined)
+      ? "Point of no return: step " + a.breaking_step
+      : "Point of no return: none",
+    "First wrong move: " + (a.first_wrong_step ?? "none"),
+    "Diagnosis: " + pretty(a.label_kind) + " / " + pretty(a.fault_class),
+    "Confidence: " + Math.round(100*(a.confidence||0)) + "%",
+    "What to change: " + (a.advice||""),
+  ];
+  try { await navigator.clipboard.writeText(lines.join("\n"));
+        $("copy-verdict").textContent = "Copied"; }
+  catch(e){ $("copy-verdict").textContent = "Copy failed"; }
+  setTimeout(() => { $("copy-verdict").textContent = "Copy verdict"; }, 1500);
+};
 
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $("theme").onclick = () => {

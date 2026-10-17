@@ -195,6 +195,9 @@ def _progress(steps: list[dict]) -> list[dict]:
                 "effect": kind,
                 "repeat": seen[key],
                 "error": s.get("error", ""),
+                # The timeline is unreadable without these: "patch" does not say
+                # which file, and "grep" does not say what was searched for.
+                "args": {k: str(v)[:120] for k, v in (s.get("args") or {}).items()},
             }
         )
     return notes
@@ -325,8 +328,18 @@ def attribute(trace: dict, library: Library | None = None) -> Attribution:
     if library and library.rows:
         hits = library.bm25.search(tokens(_trace_text(trace)), limit=5)
         votes: collections.Counter = collections.Counter()
+        shown: set[tuple] = set()
         for i, score in hits:
             row = library.rows[i]
+            # One row per distinct kind of neighbour. The library holds many runs of
+            # the same task and behaviour, and five identical lines are one piece of
+            # evidence wearing five hats.
+            signature = (row["task"], row.get("intended_fault", ""), row.get("label_kind", ""))
+            if signature in shown:
+                if row.get("intended_fault"):
+                    votes[row["intended_fault"]] += score
+                continue
+            shown.add(signature)
             neighbours.append({
                 "trace_id": row["trace_id"],
                 "task": row["task"],
