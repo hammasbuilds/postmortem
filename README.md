@@ -1,3 +1,8 @@
+> **This repository has moved.** Postmortem is now project [`projects/p03_postmortem`](https://github.com/hammasbuilds/nlp-legal-agentops/tree/main/projects/p03_postmortem) of [**nlp-legal-agentops**](https://github.com/hammasbuilds/nlp-legal-agentops), together with the other two products it was
+> built alongside. That repository has the current code, the measured numbers, a
+> screenshot of every feature and a recorded walkthrough. This one is kept for its
+> history and is no longer updated.
+
 # Postmortem
 
 Hand it an agent run that went wrong. It tells you **where the run first went wrong**, **whether any
